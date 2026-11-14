@@ -20,7 +20,7 @@ export function SiteNav() {
             </span>
             <span className="brand-name">flux/edit</span>
           </a>
-          <span className="badge-pill badge-version">v1.0.0</span>
+          <span className="badge-pill badge-version">v1.0.1</span>
           <span className="badge-pill badge-prod">0 KB Prod</span>
         </div>
 

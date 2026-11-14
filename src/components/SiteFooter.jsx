@@ -59,7 +59,7 @@ export function SiteFooter() {
             © 2026 FluxEdit Contributors · Released under MIT License
           </div>
           <div className="footer-badges">
-            <span className="spec-badge">v1.0.0</span>
+            <span className="spec-badge">v1.0.1</span>
             <span className="spec-badge green">0 KB PROD OVERHEAD</span>
             <span className="spec-badge">BABEL AST 7.26</span>
           </div>

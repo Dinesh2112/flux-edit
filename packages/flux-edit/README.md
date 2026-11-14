@@ -3,7 +3,8 @@
 > **Zero-overhead, in-browser AST visual editor for React and Vite with real-time disk sync.**  
 > Edit text, spacing, alignment, and structure visually right in your browser — watch VS Code update instantly.
 
-[![npm version](https://img.shields.io/badge/npm-1.0.0-blue.svg)](https://www.npmjs.com/package/flux-edit)
+[![npm version](https://img.shields.io/badge/npm-1.0.1-blue.svg)](https://www.npmjs.com/package/flux-edit)
+[![Live Demo](https://img.shields.io/badge/live%20demo-flux--edit.vercel.app-blueviolet.svg)](https://flux-edit.vercel.app/)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Vite](https://img.shields.io/badge/vite-4%20%7C%205%20%7C%206-purple.svg)](https://vitejs.dev/)
 [![React](https://img.shields.io/badge/react-18%20%7C%2019-cyan.svg)](https://react.dev/)

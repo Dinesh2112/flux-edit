@@ -1,5 +1,9 @@
 # FluxEdit — Browser-to-Source AST Visual Editor for React + Vite
 
+[![npm version](https://img.shields.io/badge/npm-1.0.1-blue.svg)](https://www.npmjs.com/package/flux-edit)
+[![Live Showcase](https://img.shields.io/badge/live%20demo-flux--edit.vercel.app-blueviolet.svg)](https://flux-edit.vercel.app/)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 Edit AI-generated or handwritten React UIs visually in your browser and watch the exact `.jsx` / `.tsx` files rewrite themselves cleanly on disk in real time (with instant VS Code & Vite HMR sync).
 
 ## Architecture

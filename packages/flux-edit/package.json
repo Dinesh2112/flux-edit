@@ -46,6 +46,7 @@
   ],
   "author": "FluxEdit Contributors",
   "license": "MIT",
+  "homepage": "https://flux-edit.vercel.app/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Dinesh2112/flux-edit.git"
