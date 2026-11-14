@@ -1,6 +1,6 @@
 {
   "name": "flux-edit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Zero-overhead in-browser visual AST editor for React & Vite with real-time disk sync.",
   "type": "module",
   "main": "./index.js",
@@ -60,7 +60,8 @@
     "@babel/parser": "^7.24.0",
     "@babel/traverse": "^7.24.0",
     "@babel/types": "^7.24.0",
-    "lucide-react": ">=0.300.0"
+    "lucide-react": ">=0.300.0",
+    "magic-string": "^0.30.17"
   },
   "engines": {
     "node": ">=18.0.0"
