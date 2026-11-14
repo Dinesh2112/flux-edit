@@ -1,0 +1,69 @@
+{
+  "name": "flux-edit",
+  "version": "1.0.0",
+  "description": "Zero-overhead in-browser visual AST editor for React & Vite with real-time disk sync.",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "default": "./index.js"
+    },
+    "./vite": {
+      "types": "./index.d.ts",
+      "import": "./vite-plugin.js",
+      "default": "./vite-plugin.js"
+    },
+    "./client/*": "./client/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "vite-plugin.js",
+    "ast-patcher.js",
+    "tailwind-patcher.js",
+    "security.js",
+    "client",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "react",
+    "vite",
+    "vite-plugin",
+    "visual-editor",
+    "ast",
+    "in-browser-editor",
+    "live-editing",
+    "tailwind",
+    "developer-tools",
+    "dx",
+    "wysiwyg"
+  ],
+  "author": "FluxEdit Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/flux-edit/flux-edit"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0",
+    "vite": ">=4.0.0"
+  },
+  "dependencies": {
+    "@babel/generator": "^7.24.0",
+    "@babel/parser": "^7.24.0",
+    "@babel/traverse": "^7.24.0",
+    "@babel/types": "^7.24.0",
+    "lucide-react": ">=0.300.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+
