@@ -48,7 +48,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Dinesh2112/flux-edit"
+    "url": "git+https://github.com/Dinesh2112/flux-edit.git"
   },
   "peerDependencies": {
     "react": ">=18.0.0",
