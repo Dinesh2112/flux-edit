@@ -30,11 +30,11 @@ export function SiteFooter() {
 
             <div className="links-col">
               <span className="col-heading">Open Source</span>
-              <a href="https://github.com/flux-edit/flux-edit" target="_blank" rel="noreferrer">
+              <a href="https://github.com/Dinesh2112/flux-edit" target="_blank" rel="noreferrer">
                 <span>GitHub Repository</span>
                 <ExternalLink size={11} />
               </a>
-              <a href="https://github.com/flux-edit/flux-edit/blob/main/LICENSE" target="_blank" rel="noreferrer">
+              <a href="https://github.com/Dinesh2112/flux-edit/blob/main/LICENSE" target="_blank" rel="noreferrer">
                 <span>MIT License</span>
                 <ExternalLink size={11} />
               </a>

@@ -27,10 +27,10 @@ export function ShowcaseFooter() {
 
           <div className="f-col">
             <span className="f-head">Open Source</span>
-            <a href="https://github.com/flux-edit/flux-edit" target="_blank" rel="noreferrer">
+            <a href="https://github.com/Dinesh2112/flux-edit" target="_blank" rel="noreferrer">
               GitHub Repository
             </a>
-            <a href="https://github.com/flux-edit/flux-edit/blob/main/LICENSE" target="_blank" rel="noreferrer">
+            <a href="https://github.com/Dinesh2112/flux-edit/blob/main/LICENSE" target="_blank" rel="noreferrer">
               MIT License
             </a>
             <a href="https://www.npmjs.com/package/flux-edit" target="_blank" rel="noreferrer">

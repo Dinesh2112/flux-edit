@@ -46,7 +46,7 @@ export function SiteNav() {
           </button>
 
           <a
-            href="https://github.com/flux-edit/flux-edit"
+            href="https://github.com/Dinesh2112/flux-edit"
             target="_blank"
             rel="noreferrer"
             className="github-btn"
