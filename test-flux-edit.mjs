@@ -152,6 +152,17 @@ it('pxToRadiusToken supports arbitrary values when outside standard token scale'
   assert.strictEqual(pxToRadiusToken(42), '[42px]');
 });
 
+it('patchTailwindClasses replaces existing gradient with new gradient cleanly', () => {
+  const updated = patchTailwindClasses('px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 font-bold', {
+    gradient: { direction: 'br', from: '#6366f1', to: '#a855f7' },
+  });
+  assert.ok(updated.includes('bg-gradient-to-br'));
+  assert.ok(updated.includes('from-[#6366f1]'));
+  assert.ok(updated.includes('to-[#a855f7]'));
+  assert.strictEqual(updated.includes('from-blue-500'), false);
+  assert.strictEqual(updated.includes('to-indigo-600'), false);
+});
+
 console.log('\n⚡ RUNNING AST MUTATION TEST SUITE...');
 
 const sampleJsx = `import React from 'react';
@@ -230,6 +241,34 @@ it('applyAstMutation duplicateElement clones element in AST', () => {
 it('applyAstMutation deleteElement removes element from AST', () => {
   const res = applyAstMutation(sampleJsx, 'Card.jsx', 'Card.jsx:6:7', 'deleteElement', {});
   assert.strictEqual(res.nextCode.includes('<button'), false);
+});
+
+it('applyAstMutation editText replaces text inside button with child icon while preserving icon', () => {
+  const buttonWithIconJsx = `import React from 'react';
+import { ArrowRight } from 'lucide-react';
+export default function Hero() {
+  return (
+    <button className="btn">
+      Start Free 14-Day Trial <ArrowRight className="w-4 h-4" />
+    </button>
+  );
+}`;
+  const res = applyAstMutation(buttonWithIconJsx, 'Hero.jsx', 'Hero.jsx:5:5', 'editText', {
+    text: 'Claim Your Free Account Now',
+  });
+  assert.ok(res.nextCode.includes('Claim Your Free Account Now'));
+  assert.ok(res.nextCode.includes('<ArrowRight className="w-4 h-4" />'));
+});
+
+it('applyAstMutation updateStyle applies gradient cleanly without object leak', () => {
+  const res = applyAstMutation(sampleJsx, 'Card.jsx', 'Card.jsx:6:7', 'updateStyle', {
+    styles: {
+      gradient: { direction: 'r', from: '#6366f1', to: '#a855f7' },
+      backgroundImage: 'linear-gradient(to right, #6366f1, #a855f7)',
+    },
+  });
+  assert.ok(res.nextCode.includes('backgroundImage: "linear-gradient(to right, #6366f1, #a855f7)"'));
+  assert.strictEqual(res.nextCode.includes('gradient:'), false);
 });
 
 console.log('\n⚙️ RUNNING VITE PLUGIN & AUTO-INJECTION TEST SUITE...');

@@ -164,6 +164,16 @@ export function patchTailwindClasses(currentClassString, styleUpdates) {
         'space-between': 'justify-between',
       };
       if (map[val]) replaceOrAdd(/^justify-\S+$/, map[val]);
+    } else if (key === 'gradient') {
+      // Remove any existing Tailwind gradient utilities
+      tokens = tokens.filter((t) => !/^bg-gradient-to-\S+$/.test(t) && !/^(from|via|to)-\S+$/.test(t));
+      if (val && typeof val === 'object') {
+        const dir = val.direction || 'r';
+        tokens.push(`bg-gradient-to-${dir}`);
+        if (val.from) tokens.push(`from-[${val.from}]`);
+        if (val.via) tokens.push(`via-[${val.via}]`);
+        if (val.to) tokens.push(`to-[${val.to}]`);
+      }
     }
   }
 

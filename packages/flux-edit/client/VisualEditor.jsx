@@ -21,6 +21,8 @@ import {
   Sparkles,
   AlertTriangle,
   Crosshair,
+  Sliders,
+  Palette,
 } from 'lucide-react';
 import './editor-styles.css';
 
@@ -81,16 +83,38 @@ function getFriendlyName(el) {
   return cls ? `${tag}.${cls}` : tag;
 }
 
+const GRADIENT_PRESETS = [
+  { name: 'Indigo Glow', from: '#6366f1', to: '#a855f7' },
+  { name: 'Sunset Blaze', from: '#f43f5e', to: '#f59e0b' },
+  { name: 'Cyber Violet', from: '#8b5cf6', to: '#ec4899' },
+  { name: 'Ocean Emerald', from: '#06b6d4', to: '#10b981' },
+  { name: 'Aurora Tech', from: '#3b82f6', to: '#14b8a6' },
+  { name: 'Midnight Slate', from: '#334155', to: '#0f172a' },
+];
+
 function readElementVisualState(el) {
   if (!el) return null;
   const cs = window.getComputedStyle(el);
+  const textNodes = Array.from(el.childNodes).filter(
+    (n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim().length > 0
+  );
+  const hasDirectText = textNodes.length > 0;
+  const directText = hasDirectText
+    ? textNodes.map((n) => n.textContent).join(' ').trim()
+    : (el.textContent || '').trim();
+  const bgImg = cs.backgroundImage || '';
+  const hasGrad =
+    bgImg.includes('gradient') ||
+    (typeof el.className === 'string' && el.className.includes('bg-gradient-'));
+
   return {
     tag: el.tagName.toLowerCase(),
     displayTag: getFriendlyName(el),
     loc: el.getAttribute('data-fe-loc') || '',
     isDynamic: el.getAttribute('data-fe-dynamic') === 'true',
-    canEditText: el.childElementCount === 0,
-    text: el.textContent || '',
+    canEditText: el.childElementCount === 0 || hasDirectText,
+    hasDirectText,
+    text: directText,
     className: el.getAttribute('class') || '',
     display: cs.display,
     flexDirection: cs.flexDirection,
@@ -106,6 +130,8 @@ function readElementVisualState(el) {
     textAlign: cs.textAlign,
     color: rgbToHex(cs.color) || '#0f172a',
     backgroundColor: rgbToHex(cs.backgroundColor) || '',
+    backgroundImage: bgImg,
+    hasGradient: hasGrad,
   };
 }
 
@@ -138,6 +164,10 @@ export function VisualEditor() {
 
 function VisualEditorOverlay() {
   const [editMode, setEditMode] = useState(false);
+  const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [gradFrom, setGradFrom] = useState('#6366f1');
+  const [gradTo, setGradTo] = useState('#a855f7');
+  const [gradDir, setGradDir] = useState('r');
   const [taggedCount, setTaggedCount] = useState(0);
   const [quickTargets, setQuickTargets] = useState([]);
   const [hoverBox, setHoverBox] = useState(null);
@@ -182,6 +212,7 @@ function VisualEditorOverlay() {
 
     selectedElRef.current = el;
     setSelectedLoc(loc);
+    setIsPanelOpen(true);
     setSelectionRevision((r) => r + 1);
 
     const r = el.getBoundingClientRect();
@@ -500,15 +531,46 @@ function VisualEditorOverlay() {
         }
 
         // Priority 1: Direct sibling in the same container
-        const sibling = candidates.find(
+        let sibling = candidates.find(
           (c) =>
             c !== dragEl &&
             c.parentElement === parent &&
             c.getAttribute('data-fe-dynamic') !== 'true'
         );
+
+        // Proximity detection: if cursor is near siblings in the same parent container
+        if (!sibling && parent) {
+          const siblings = Array.from(parent.children).filter(
+            (c) =>
+              c !== dragEl &&
+              c.getAttribute?.('data-fe-loc') &&
+              c.getAttribute('data-fe-dynamic') !== 'true'
+          );
+          let closest = null;
+          let minDist = 220;
+          for (const s of siblings) {
+            const sr = s.getBoundingClientRect();
+            const sCenterX = sr.left + sr.width / 2;
+            const sCenterY = sr.top + sr.height / 2;
+            const dist = Math.hypot(clientX - sCenterX, clientY - sCenterY);
+            if (dist < minDist) {
+              minDist = dist;
+              closest = s;
+            }
+          }
+          if (closest) sibling = closest;
+        }
+
         if (sibling) {
           const r = sibling.getBoundingClientRect();
-          const isLeftHalf = clientX < r.left + r.width / 2;
+          const parentCs = parent ? window.getComputedStyle(parent) : null;
+          const isRow = parentCs
+            ? (parentCs.display.includes('flex') && parentCs.flexDirection.startsWith('row')) ||
+              parentCs.display.includes('inline')
+            : false;
+          const isLeftHalf = isRow
+            ? clientX < r.left + r.width / 2
+            : clientY < r.top + r.height / 2;
           return {
             sourceEl: dragEl,
             sourceLoc: dragLoc,
@@ -517,7 +579,7 @@ function VisualEditorOverlay() {
             mode: 'swap',
             targetRect: r,
             isLeftHalf,
-            label: `Place next to ${getFriendlyName(sibling)}`,
+            label: `Place ${isLeftHalf ? 'before' : 'after'} ${getFriendlyName(sibling)}`,
           };
         }
 
@@ -585,7 +647,12 @@ function VisualEditorOverlay() {
         lastDx = dx;
         lastDy = dy;
 
+        // Temporarily ignore dragEl for elementsFromPoint so elements underneath can be detected
+        const prevPe = dragEl.style.pointerEvents;
+        dragEl.style.pointerEvents = 'none';
         const res = findDropResolution(me.clientX, me.clientY);
+        dragEl.style.pointerEvents = prevPe;
+
         if (res) {
           dragEl.style.transform = '';
           dropTargetRef.current = res;
@@ -654,14 +721,17 @@ function VisualEditorOverlay() {
             selectElementNode(resolved.sourceEl);
           }
           mutateSource('moveSibling', { targetLoc: resolved.targetLoc }, resolved.sourceLoc);
-        } else if (Math.abs(lastDx) > 4 || Math.abs(lastDy) > 4) {
-          // User dragged in empty space -> commit position change!
-          const nextMarginLeft = Math.max(0, initialMarginLeft + lastDx);
-          const updates = { marginLeft: `${nextMarginLeft}px` };
-          if (Math.abs(lastDy) > 5) {
-            updates.marginTop = `${Math.max(0, initialMarginTop + lastDy)}px`;
+        } else {
+          // Dragged in empty space or cancelled: do NOT corrupt layout with random margins!
+          // Smoothly reset transform
+          dragEl.style.transition = 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+          dragEl.style.transform = '';
+          setTimeout(() => {
+            if (dragEl) dragEl.style.transition = '';
+          }, 200);
+          if (Math.abs(lastDx) > 30 || Math.abs(lastDy) > 30) {
+            showNotice('Drop onto a neighboring card or button to swap in JSX');
           }
-          mutateSource('updateStyle', { styles: updates }, dragLoc);
         }
       };
 
@@ -702,7 +772,7 @@ function VisualEditorOverlay() {
           left: r.left,
           width: r.width,
           height: r.height,
-          label: `<${describeElement(el)}> · ${shortFile}:${line}`,
+          label: `<${getFriendlyName(el)}> · ${shortFile}:${line}`,
         });
       } catch (err) {
         showNotice(`Hover error: ${err.message}`, true);
@@ -721,6 +791,12 @@ function VisualEditorOverlay() {
       const hitEl = findAnnotatedTarget(e.target);
       if (!hitEl) return;
 
+      // Prevent native button/link actions from triggering while in Edit Mode
+      const interactive = e.target instanceof Element && e.target.closest('button, a, [role="button"], input, select');
+      if (interactive && !e.target.closest('[data-flux-ui]')) {
+        e.preventDefault();
+      }
+
       const explicitSelection = Boolean(selectedElRef.current && selectedElRef.current.contains(hitEl));
       const dragEl = explicitSelection ? selectedElRef.current : hitEl;
 
@@ -731,7 +807,7 @@ function VisualEditorOverlay() {
 
       const onCheckDrag = (me) => {
         const dist = Math.hypot(me.clientX - startX, me.clientY - startY);
-        if (dist > 8 && !startedDrag) {
+        if (dist > 14 && !startedDrag) {
           startedDrag = true;
           suppressNextClickRef.current = true;
           window.removeEventListener('pointermove', onCheckDrag, true);
@@ -760,6 +836,14 @@ function VisualEditorOverlay() {
           e.stopPropagation();
           return;
         }
+
+        // Suppress native action for buttons and links in Edit Mode
+        const interactive = e.target instanceof Element && e.target.closest('button, a, [role="button"], input, select');
+        if (interactive && !e.target.closest('[data-flux-ui]')) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+
         const el = findAnnotatedTarget(e.target);
         if (!el) return;
 
@@ -780,12 +864,84 @@ function VisualEditorOverlay() {
         e.preventDefault();
         e.stopPropagation();
 
+        const loc = el.getAttribute('data-fe-loc');
+
+        // Case 1: Element has child elements (e.g. <button>Start Free Trial <ArrowRight /></button>)
         if (el.childElementCount > 0) {
-          showNotice('Double-click a specific text element (not a container)', true);
+          const directTextNode = Array.from(el.childNodes).find(
+            (n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim().length > 0
+          );
+          if (!directTextNode) {
+            showNotice('Double-click a specific text element (not a container)', true);
+            return;
+          }
+
+          const originalDirectText = directTextNode.textContent.trim();
+          const editSpan = document.createElement('span');
+          editSpan.setAttribute('data-flux-inline-edit', 'true');
+          editSpan.setAttribute('contenteditable', 'true');
+          editSpan.style.outline = '2px solid #10b981';
+          editSpan.style.borderRadius = '4px';
+          editSpan.style.padding = '0 2px';
+          editSpan.textContent = originalDirectText;
+          directTextNode.replaceWith(editSpan);
+          inlineEditingRef.current = true;
+          editSpan.focus();
+
+          const range = document.createRange();
+          range.selectNodeContents(editSpan);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+
+          const commitDirectText = async (newText) => {
+            const clean = (newText || '').trim();
+            const replacementNode = document.createTextNode(clean ? ` ${clean} ` : '');
+            editSpan.replaceWith(replacementNode);
+            window.removeEventListener('pointerdown', onOuterDown, true);
+            editSpan.removeEventListener('keydown', onKey);
+            editSpan.removeEventListener('blur', onBlur);
+            inlineEditingRef.current = false;
+
+            if (clean && clean !== originalDirectText) {
+              const ok = await mutateSource(
+                'editText',
+                { text: clean, instanceIndex: selectedInstanceIndexRef.current },
+                loc
+              );
+              if (ok) {
+                setElProps((prev) => (prev ? { ...prev, text: clean } : prev));
+              }
+            }
+          };
+
+          const onKey = (ke) => {
+            if (ke.key === 'Enter') {
+              ke.preventDefault();
+              commitDirectText(editSpan.textContent || '');
+            } else if (ke.key === 'Escape') {
+              ke.preventDefault();
+              commitDirectText(originalDirectText);
+            }
+          };
+
+          const onBlur = () => {
+            commitDirectText(editSpan.textContent || '');
+          };
+
+          const onOuterDown = (oe) => {
+            if (!editSpan.contains(oe.target)) {
+              commitDirectText(editSpan.textContent || '');
+            }
+          };
+
+          editSpan.addEventListener('keydown', onKey);
+          editSpan.addEventListener('blur', onBlur);
+          setTimeout(() => window.addEventListener('pointerdown', onOuterDown, true), 20);
           return;
         }
 
-        const loc = el.getAttribute('data-fe-loc');
+        // Case 2: Simple text element without children
         const originalText = el.textContent || '';
         inlineEditingRef.current = true;
         el.setAttribute('contenteditable', 'true');
@@ -884,6 +1040,48 @@ function VisualEditorOverlay() {
     if (immediate) commit();
     else styleTimerRef.current = setTimeout(commit, 220);
   };
+
+  const applyGradientStyle = useCallback(
+    (from, to, dir = 'r') => {
+      setGradFrom(from);
+      setGradTo(to);
+      setGradDir(dir);
+      const dirMap = {
+        r: 'to right',
+        br: 'to bottom right',
+        b: 'to bottom',
+        tr: 'to top right',
+      };
+      const cssDir = dirMap[dir] || 'to right';
+      const gradCss = `linear-gradient(${cssDir}, ${from}, ${to})`;
+      if (selectedElRef.current) {
+        selectedElRef.current.style.backgroundImage = gradCss;
+        syncRectOnly();
+      }
+      setElProps((prev) => (prev ? { ...prev, backgroundImage: gradCss, hasGradient: true } : prev));
+      mutateSource('updateStyle', {
+        styles: {
+          gradient: { direction: dir, from, to },
+          backgroundImage: gradCss,
+        },
+      });
+    },
+    [mutateSource, syncRectOnly]
+  );
+
+  const clearGradientStyle = useCallback(() => {
+    if (selectedElRef.current) {
+      selectedElRef.current.style.backgroundImage = '';
+      syncRectOnly();
+    }
+    setElProps((prev) => (prev ? { ...prev, backgroundImage: '', hasGradient: false } : prev));
+    mutateSource('updateStyle', {
+      styles: {
+        gradient: null,
+        backgroundImage: '',
+      },
+    });
+  }, [mutateSource, syncRectOnly]);
 
   const nudgeElement = useCallback(
     (dir, amount = 12) => {
@@ -1181,7 +1379,7 @@ function VisualEditorOverlay() {
 
       {/* Docked Right DevTools Inspector — Immediately visible in Edit Mode! */}
       {editMode && (
-        <aside className="fe-inspector">
+        <aside className={`fe-inspector ${!isPanelOpen ? 'fe-collapsed' : ''}`}>
           {!selectedLoc || !elProps ? (
             <>
               <div className="fe-insp-head">
@@ -1197,8 +1395,9 @@ function VisualEditorOverlay() {
                 <button
                   className="fe-act-btn"
                   style={{ padding: '4px 6px' }}
-                  onClick={() => setEditMode(false)}
-                  aria-label="Exit Edit Mode"
+                  onClick={() => setIsPanelOpen(false)}
+                  aria-label="Collapse Inspector"
+                  title="Close Inspector (reopen from bottom toolbar)"
                 >
                   <X size={14} />
                 </button>
@@ -1287,14 +1486,26 @@ function VisualEditorOverlay() {
                     {selectedLoc}
                   </div>
                 </div>
-                <button
-                  className="fe-act-btn"
-                  style={{ padding: '4px 6px' }}
-                  onClick={() => setSelectedLoc(null)}
-                  aria-label="Back to overview"
-                >
-                  <X size={14} />
-                </button>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    className="fe-act-btn"
+                    style={{ padding: '4px 6px' }}
+                    onClick={() => setSelectedLoc(null)}
+                    aria-label="Back to overview"
+                    title="Back to element list"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  <button
+                    className="fe-act-btn"
+                    style={{ padding: '4px 6px' }}
+                    onClick={() => setIsPanelOpen(false)}
+                    aria-label="Collapse Inspector"
+                    title="Close Inspector (reopen from bottom toolbar)"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
 
               <div className="fe-insp-body">
@@ -1369,7 +1580,16 @@ function VisualEditorOverlay() {
                         onChange={(e) => setElProps({ ...elProps, text: e.target.value })}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            if (selectedElRef.current) selectedElRef.current.textContent = elProps.text;
+                            if (selectedElRef.current) {
+                              if (elProps.hasDirectText && selectedElRef.current.childElementCount > 0) {
+                                const directTextNode = Array.from(selectedElRef.current.childNodes).find(
+                                  (n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim().length > 0
+                                );
+                                if (directTextNode) directTextNode.textContent = ` ${elProps.text} `;
+                              } else {
+                                selectedElRef.current.textContent = elProps.text;
+                              }
+                            }
                             mutateSource('editText', { text: elProps.text, instanceIndex: selectedInstanceIndexRef.current });
                           }
                         }}
@@ -1377,7 +1597,16 @@ function VisualEditorOverlay() {
                       <button
                         className="fe-act-btn active"
                         onClick={() => {
-                          if (selectedElRef.current) selectedElRef.current.textContent = elProps.text;
+                          if (selectedElRef.current) {
+                            if (elProps.hasDirectText && selectedElRef.current.childElementCount > 0) {
+                              const directTextNode = Array.from(selectedElRef.current.childNodes).find(
+                                (n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim().length > 0
+                              );
+                              if (directTextNode) directTextNode.textContent = ` ${elProps.text} `;
+                            } else {
+                              selectedElRef.current.textContent = elProps.text;
+                            }
+                          }
                           mutateSource('editText', { text: elProps.text, instanceIndex: selectedInstanceIndexRef.current });
                         }}
                         title="Save text to code"
@@ -1618,6 +1847,109 @@ function VisualEditorOverlay() {
                   </div>
                 </div>
 
+                {/* Gradient Studio */}
+                <div className="fe-section">
+                  <div className="fe-label">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Palette size={13} color="#818cf8" />
+                      <span>Gradient Studio</span>
+                    </div>
+                    {elProps.hasGradient && (
+                      <button
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#f43f5e',
+                          cursor: 'pointer',
+                          fontSize: 10,
+                          fontWeight: 600,
+                        }}
+                        onClick={clearGradientStyle}
+                      >
+                        Clear Gradient
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Direction Controls */}
+                  <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                    {[
+                      { dir: 'r', label: '→ Right' },
+                      { dir: 'br', label: '↘ Diag' },
+                      { dir: 'b', label: '↓ Down' },
+                      { dir: 'tr', label: '↗ Up-Rt' },
+                    ].map((d) => (
+                      <button
+                        key={d.dir}
+                        className={`fe-grad-dir-btn ${gradDir === d.dir ? 'active' : ''}`}
+                        onClick={() => applyGradientStyle(gradFrom, gradTo, d.dir)}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Presets */}
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Modern Presets</div>
+                  <div className="fe-grad-presets-grid">
+                    {GRADIENT_PRESETS.map((p) => (
+                      <div
+                        key={p.name}
+                        className={`fe-grad-chip ${gradFrom === p.from && gradTo === p.to ? 'active' : ''}`}
+                        style={{ background: `linear-gradient(to right, ${p.from}, ${p.to})` }}
+                        onClick={() => applyGradientStyle(p.from, p.to, gradDir)}
+                        title={p.name}
+                      >
+                        <span>{p.name}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Custom Stops */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+                    <div>
+                      <div style={{ fontSize: 10.5, color: '#94a3b8', marginBottom: 3 }}>From Stop</div>
+                      <div className="fe-color-row">
+                        <input
+                          type="color"
+                          className="fe-color-swatch"
+                          value={gradFrom}
+                          onChange={(e) => applyGradientStyle(e.target.value, gradTo, gradDir)}
+                        />
+                        <input
+                          className="fe-input"
+                          value={gradFrom}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setGradFrom(v);
+                            if (/^#[0-9a-f]{6}$/i.test(v)) applyGradientStyle(v, gradTo, gradDir);
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10.5, color: '#94a3b8', marginBottom: 3 }}>To Stop</div>
+                      <div className="fe-color-row">
+                        <input
+                          type="color"
+                          className="fe-color-swatch"
+                          value={gradTo}
+                          onChange={(e) => applyGradientStyle(gradFrom, e.target.value, gradDir)}
+                        />
+                        <input
+                          className="fe-input"
+                          value={gradTo}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setGradTo(v);
+                            if (/^#[0-9a-f]{6}$/i.test(v)) applyGradientStyle(gradFrom, v, gradDir);
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* ClassName Editor */}
                 <div className="fe-section">
                   <div className="fe-label">CSS className</div>
@@ -1760,6 +2092,15 @@ function VisualEditorOverlay() {
 
         {editMode && (
           <>
+            <div className="fe-divider" />
+            <button
+              className={`fe-pill-btn ${isPanelOpen ? 'active' : ''}`}
+              onClick={() => setIsPanelOpen((v) => !v)}
+              title="Toggle Inspector Sidebar"
+            >
+              <Sliders size={14} />
+              <span>Inspector</span>
+            </button>
             <div className="fe-divider" />
             <button
               className="fe-pill-btn"

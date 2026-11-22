@@ -280,7 +280,13 @@ export function applyAstMutation(code, relPath, loc, action, payload = {}) {
     // Case D: Static text or direct JSX replacement
     if (!handled) {
       const safeText = escapeJsxText(newText);
-      if (targetNode.children.length > 0) {
+      const jsxTextChild = targetNode.children.find((c) => c.type === 'JSXText' && c.value.trim().length > 0);
+      if (jsxTextChild) {
+        // If element has other children (like an icon in a button), replace only the text node!
+        const leadingSpace = /^\s+/.test(jsxTextChild.value) ? ' ' : '';
+        const trailingSpace = /\s+$/.test(jsxTextChild.value) ? ' ' : '';
+        s.overwrite(jsxTextChild.start, jsxTextChild.end, `${leadingSpace}${safeText}${trailingSpace}`);
+      } else if (targetNode.children.length > 0) {
         const first = targetNode.children[0];
         const last = targetNode.children[targetNode.children.length - 1];
         s.overwrite(first.start, last.end, safeText);
@@ -344,6 +350,7 @@ export function applyAstMutation(code, relPath, loc, action, payload = {}) {
         }
 
         for (const [key, val] of Object.entries(updates)) {
+          if (key === 'gradient') continue;
           if (val === '' || val === null || val === undefined) {
             mergedProps.delete(key);
           } else {
@@ -363,7 +370,7 @@ export function applyAstMutation(code, relPath, loc, action, payload = {}) {
         }
       } else {
         const validPairs = Object.entries(updates).filter(
-          ([, val]) => val !== '' && val !== null && val !== undefined
+          ([k, val]) => k !== 'gradient' && val !== '' && val !== null && val !== undefined
         );
         if (validPairs.length > 0) {
           const propsStr = validPairs

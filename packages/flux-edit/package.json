@@ -1,6 +1,6 @@
 {
   "name": "flux-edit",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Zero-overhead in-browser visual AST editor for React & Vite with real-time disk sync.",
   "type": "module",
   "main": "./index.js",
