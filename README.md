@@ -1,6 +1,6 @@
 # FluxEdit — Browser-to-Source AST Visual Editor for React + Vite
 
-[![npm version](https://img.shields.io/badge/npm-1.0.1-blue.svg)](https://www.npmjs.com/package/flux-edit)
+[![npm version](https://img.shields.io/badge/npm-1.0.2-blue.svg)](https://www.npmjs.com/package/flux-edit)
 [![Live Showcase](https://img.shields.io/badge/live%20demo-flux--edit.vercel.app-blueviolet.svg)](https://flux-edit.vercel.app/)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
