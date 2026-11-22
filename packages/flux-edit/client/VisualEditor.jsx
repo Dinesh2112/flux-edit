@@ -23,12 +23,34 @@ import {
   Crosshair,
   Sliders,
   Palette,
+  RotateCcw,
 } from 'lucide-react';
 import './editor-styles.css';
 
 function parsePx(val) {
   const num = parseInt(val, 10);
   return Number.isFinite(num) ? num : 0;
+}
+
+function parseCurrentTranslate(el) {
+  if (!el) return { x: 0, y: 0 };
+  const inline = el.style?.transform || '';
+  const inlineMatch = inline.match(/translate\(\s*(-?\d+(?:\.\d+)?)(?:px)?\s*,\s*(-?\d+(?:\.\d+)?)(?:px)?\s*\)/i);
+  if (inlineMatch) {
+    return { x: Math.round(parseFloat(inlineMatch[1])), y: Math.round(parseFloat(inlineMatch[2])) };
+  }
+  const cs = window.getComputedStyle(el);
+  const t = cs.transform;
+  if (!t || t === 'none') return { x: 0, y: 0 };
+  const m2d = t.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)/i);
+  if (m2d) {
+    return { x: Math.round(parseFloat(m2d[1])), y: Math.round(parseFloat(m2d[2])) };
+  }
+  const m3d = t.match(/matrix3d\((?:[^,]+,){12}\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i);
+  if (m3d) {
+    return { x: Math.round(parseFloat(m3d[1])), y: Math.round(parseFloat(m3d[2])) };
+  }
+  return { x: 0, y: 0 };
 }
 
 function rgbToHex(rgb) {
@@ -132,6 +154,11 @@ function readElementVisualState(el) {
     backgroundColor: rgbToHex(cs.backgroundColor) || '',
     backgroundImage: bgImg,
     hasGradient: hasGrad,
+    position: cs.position,
+    left: parsePx(cs.left),
+    top: parsePx(cs.top),
+    transformX: parseCurrentTranslate(el).x,
+    transformY: parseCurrentTranslate(el).y,
   };
 }
 
@@ -164,7 +191,31 @@ export function VisualEditor() {
 
 function VisualEditorOverlay() {
   const [editMode, setEditMode] = useState(false);
-  const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [isPanelOpen, setIsPanelOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem('fe_panel_open');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const closePanel = useCallback(() => {
+    setIsPanelOpen(false);
+    try {
+      localStorage.setItem('fe_panel_open', 'false');
+    } catch {}
+  }, []);
+
+  const togglePanel = useCallback(() => {
+    setIsPanelOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('fe_panel_open', String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
   const [gradFrom, setGradFrom] = useState('#6366f1');
   const [gradTo, setGradTo] = useState('#a855f7');
   const [gradDir, setGradDir] = useState('r');
@@ -212,7 +263,6 @@ function VisualEditorOverlay() {
 
     selectedElRef.current = el;
     setSelectedLoc(loc);
-    setIsPanelOpen(true);
     setSelectionRevision((r) => r + 1);
 
     const r = el.getBoundingClientRect();
@@ -493,9 +543,9 @@ function VisualEditorOverlay() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [editMode, selectedLoc, handleUndo, handleRedo]);
 
-  // Reusable drag tracker with insertion drop bar + seamless empty-space position dragging
+  // Reusable drag tracker with insertion drop bar + Figma-grade free placement anywhere
   const beginSiblingDragSession = useCallback(
-    (dragEl, dragLoc, startX = 0, startY = 0, allowAncestorPromotion = false) => {
+    (dragEl, dragLoc, startX = 0, startY = 0) => {
       if (!dragEl || !dragEl.parentElement) return;
       if (dragEl.getAttribute('data-fe-dynamic') === 'true') {
         showNotice('Loop items (.map) cannot be dragged individually', true);
@@ -504,8 +554,12 @@ function VisualEditorOverlay() {
 
       const parent = dragEl.parentElement;
       const initialCs = window.getComputedStyle(dragEl);
-      const initialMarginLeft = parsePx(initialCs.marginLeft);
-      const initialMarginTop = parsePx(initialCs.marginTop);
+      const isInline = initialCs.display === 'inline';
+      // In CSS, transform is ignored on display: inline. Ensure transformable display:
+      if (isInline) {
+        dragEl.style.display = 'inline-block';
+      }
+      const initialTranslate = parseCurrentTranslate(dragEl);
       const dragFile = getFileFromLoc(dragLoc);
       const dragLabel = getFriendlyName(dragEl);
 
@@ -513,7 +567,10 @@ function VisualEditorOverlay() {
       suppressNextClickRef.current = true;
       setHoverBox(null);
       document.body.style.cursor = 'grabbing';
-      setDragGhost({ x: startX, y: startY, label: `Move ${dragLabel}`, mode: 'drag', ready: false });
+      dragEl.style.opacity = '0.75';
+      dragEl.style.transition = 'none';
+      dragEl.style.boxShadow = '0 16px 36px rgba(0, 0, 0, 0.4)';
+      setDragGhost(null);
 
       let lastDx = 0;
       let lastDy = 0;
@@ -530,7 +587,7 @@ function VisualEditorOverlay() {
           }
         }
 
-        // Priority 1: Direct sibling in the same container
+        // Priority 1: Direct sibling in the same container under cursor
         let sibling = candidates.find(
           (c) =>
             c !== dragEl &&
@@ -538,7 +595,7 @@ function VisualEditorOverlay() {
             c.getAttribute('data-fe-dynamic') !== 'true'
         );
 
-        // Proximity detection: if cursor is near siblings in the same parent container
+        // Proximity detection: ONLY if cursor is within tight slot threshold (35px) of a sibling's border
         if (!sibling && parent) {
           const siblings = Array.from(parent.children).filter(
             (c) =>
@@ -547,12 +604,12 @@ function VisualEditorOverlay() {
               c.getAttribute('data-fe-dynamic') !== 'true'
           );
           let closest = null;
-          let minDist = 220;
+          let minDist = 35; // Tight slot threshold so free space is respected like Figma
           for (const s of siblings) {
             const sr = s.getBoundingClientRect();
-            const sCenterX = sr.left + sr.width / 2;
-            const sCenterY = sr.top + sr.height / 2;
-            const dist = Math.hypot(clientX - sCenterX, clientY - sCenterY);
+            const nearX = Math.max(sr.left - clientX, 0, clientX - sr.right);
+            const nearY = Math.max(sr.top - clientY, 0, clientY - sr.bottom);
+            const dist = Math.hypot(nearX, nearY);
             if (dist < minDist) {
               minDist = dist;
               closest = s;
@@ -578,63 +635,9 @@ function VisualEditorOverlay() {
             targetLoc: sibling.getAttribute('data-fe-loc'),
             mode: 'swap',
             targetRect: r,
+            isRow,
             isLeftHalf,
             label: `Place ${isLeftHalf ? 'before' : 'after'} ${getFriendlyName(sibling)}`,
-          };
-        }
-
-        // Priority 2: When dragging an unselected child inside a card/column onto a sibling card
-        if (allowAncestorPromotion) {
-          let anc = dragEl.parentElement?.closest('[data-fe-loc]') || null;
-          while (anc) {
-            const ancLoc = anc.getAttribute('data-fe-loc') || '';
-            const ancFile = getFileFromLoc(ancLoc);
-            if (ancFile !== dragFile || anc.getAttribute('data-fe-dynamic') === 'true') break;
-
-            const ancParent = anc.parentElement;
-            if (ancParent && ancParent.id !== 'root') {
-              const sibAnc = candidates.find(
-                (c) =>
-                  c !== anc &&
-                  c.parentElement === ancParent &&
-                  c.tagName === anc.tagName &&
-                  c.getAttribute('data-fe-dynamic') !== 'true' &&
-                  getFileFromLoc(c.getAttribute('data-fe-loc')) === ancFile
-              );
-              if (sibAnc) {
-                const r = sibAnc.getBoundingClientRect();
-                return {
-                  sourceEl: anc,
-                  sourceLoc: ancLoc,
-                  targetEl: sibAnc,
-                  targetLoc: sibAnc.getAttribute('data-fe-loc'),
-                  mode: 'swap',
-                  targetRect: r,
-                  label: `Swap ${getFriendlyName(anc)} ↔ ${getFriendlyName(sibAnc)}`,
-                };
-              }
-            }
-            anc = anc.parentElement?.closest('[data-fe-loc]') || null;
-          }
-        }
-
-        // Priority 3: Cross-container move to any non-overlapping element in the same file
-        const cross = candidates.find((c) => {
-          if (c === dragEl || dragEl.contains(c) || c.contains(dragEl)) return false;
-          if (c.getAttribute('data-fe-dynamic') === 'true') return false;
-          return getFileFromLoc(c.getAttribute('data-fe-loc')) === dragFile;
-        });
-
-        if (cross) {
-          const r = cross.getBoundingClientRect();
-          return {
-            sourceEl: dragEl,
-            sourceLoc: dragLoc,
-            targetEl: cross,
-            targetLoc: cross.getAttribute('data-fe-loc'),
-            mode: 'move',
-            targetRect: r,
-            label: `Move ${dragLabel} → ${getFriendlyName(cross)}`,
           };
         }
 
@@ -647,49 +650,57 @@ function VisualEditorOverlay() {
         lastDx = dx;
         lastDy = dy;
 
+        const currentX = initialTranslate.x + dx;
+        const currentY = initialTranslate.y + dy;
+
         // Temporarily ignore dragEl for elementsFromPoint so elements underneath can be detected
         const prevPe = dragEl.style.pointerEvents;
         dragEl.style.pointerEvents = 'none';
         const res = findDropResolution(me.clientX, me.clientY);
         dragEl.style.pointerEvents = prevPe;
 
+        // Keep the dragged element moving smoothly under cursor with hardware acceleration
+        dragEl.style.transform = `translate(${currentX}px, ${currentY}px)`;
+        dragEl.style.zIndex = '999990';
+        syncRectOnly();
+
         if (res) {
-          dragEl.style.transform = '';
           dropTargetRef.current = res;
           const r = res.targetRect;
+          const isRow = res.isRow;
+          const isBefore = res.isLeftHalf;
 
-          // Draw an accurate insertion bar line
-          const barLeft = res.isLeftHalf ? r.left - 2 : r.right - 1;
-          setDropBar({
-            top: r.top - 2,
-            left: barLeft,
-            width: 3,
-            height: r.height + 4,
-            label: res.label,
-          });
+          if (isRow) {
+            // Horizontal row (e.g. buttons side-by-side, navbar links): VERTICAL BAR
+            setDropBar({
+              top: r.top - 2,
+              left: isBefore ? r.left - 2 : r.right - 1,
+              width: 3,
+              height: r.height + 4,
+              label: res.label,
+              isRow: true,
+            });
+          } else {
+            // Vertical column (e.g. hero stack, cards column, paragraphs): HORIZONTAL BAR
+            setDropBar({
+              top: isBefore ? r.top - 2 : r.bottom - 1,
+              left: r.left,
+              width: r.width,
+              height: 3,
+              label: res.label,
+              isRow: false,
+            });
+          }
           setDropBox(null);
-          setDragGhost({
-            x: me.clientX,
-            y: me.clientY,
-            label: res.label,
-            mode: res.mode,
-            ready: true,
-          });
+          setDragGhost(null);
         } else {
-          // If no drop target under cursor: seamlessly shift element visually!
           dropTargetRef.current = null;
           setDropBar(null);
           setDropBox(null);
-
-          dragEl.style.transform = `translate(${dx}px, ${dy}px)`;
-          dragEl.style.zIndex = '999990';
-          syncRectOnly();
-
-          const xLabel = dx >= 0 ? `+${dx}px` : `${dx}px`;
           setDragGhost({
             x: me.clientX,
             y: me.clientY,
-            label: `Move Position (X: ${xLabel})`,
+            label: `Place at (${currentX >= 0 ? '+' : ''}${currentX}px, ${currentY >= 0 ? '+' : ''}${currentY}px)`,
             mode: 'position',
             ready: true,
           });
@@ -705,9 +716,9 @@ function VisualEditorOverlay() {
         window.removeEventListener('pointermove', onMove, true);
         window.removeEventListener('pointerup', onUp, true);
 
-        dragEl.style.transform = '';
+        dragEl.style.opacity = '';
+        dragEl.style.boxShadow = '';
         dragEl.style.zIndex = '';
-        syncRectOnly();
 
         setTimeout(() => {
           suppressNextClickRef.current = false;
@@ -717,20 +728,53 @@ function VisualEditorOverlay() {
         dropTargetRef.current = null;
 
         if (resolved?.targetLoc && resolved?.sourceLoc) {
+          // Case 1: Dropped onto insertion bar -> Reorder JSX in layout flow
+          dragEl.style.transform = '';
+          if (isInline) {
+            dragEl.style.display = '';
+          }
+          syncRectOnly();
           if (resolved.sourceEl !== dragEl) {
             selectElementNode(resolved.sourceEl);
           }
-          mutateSource('moveSibling', { targetLoc: resolved.targetLoc }, resolved.sourceLoc);
+          mutateSource(
+            'moveSibling',
+            { targetLoc: resolved.targetLoc, position: resolved.isLeftHalf ? 'before' : 'after' },
+            resolved.sourceLoc
+          );
         } else {
-          // Dragged in empty space or cancelled: do NOT corrupt layout with random margins!
-          // Smoothly reset transform
-          dragEl.style.transition = 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
-          dragEl.style.transform = '';
-          setTimeout(() => {
-            if (dragEl) dragEl.style.transition = '';
-          }, 200);
-          if (Math.abs(lastDx) > 30 || Math.abs(lastDy) > 30) {
-            showNotice('Drop onto a neighboring card or button to swap in JSX');
+          // Case 2: Dropped anywhere freely on canvas (Figma-style free placement!)
+          const finalX = Math.round(initialTranslate.x + lastDx);
+          const finalY = Math.round(initialTranslate.y + lastDy);
+
+          if (Math.abs(lastDx) > 3 || Math.abs(lastDy) > 3) {
+            // Keep the exact position where user dropped it
+            dragEl.style.transform = `translate(${finalX}px, ${finalY}px)`;
+            if (isInline) {
+              dragEl.style.display = 'inline-block';
+            }
+            syncRectOnly();
+            const updates = { transform: `translate(${finalX}px, ${finalY}px)` };
+            if (isInline) {
+              updates.display = 'inline-block';
+            }
+            mutateSource(
+              'updateStyle',
+              { styles: updates },
+              dragLoc
+            );
+            showNotice(`Placed ${dragLabel} at (${finalX >= 0 ? '+' : ''}${finalX}px, ${finalY >= 0 ? '+' : ''}${finalY}px)`);
+          } else {
+            // Minimal jitter: restore initial translation
+            if (initialTranslate.x !== 0 || initialTranslate.y !== 0) {
+              dragEl.style.transform = `translate(${initialTranslate.x}px, ${initialTranslate.y}px)`;
+            } else {
+              dragEl.style.transform = '';
+              if (isInline) {
+                dragEl.style.display = '';
+              }
+            }
+            syncRectOnly();
           }
         }
       };
@@ -797,8 +841,8 @@ function VisualEditorOverlay() {
         e.preventDefault();
       }
 
-      const explicitSelection = Boolean(selectedElRef.current && selectedElRef.current.contains(hitEl));
-      const dragEl = explicitSelection ? selectedElRef.current : hitEl;
+      // Always target the exact element directly under pointer so any element can be dragged
+      const dragEl = hitEl;
 
       const startX = e.clientX;
       const startY = e.clientY;
@@ -807,13 +851,13 @@ function VisualEditorOverlay() {
 
       const onCheckDrag = (me) => {
         const dist = Math.hypot(me.clientX - startX, me.clientY - startY);
-        if (dist > 14 && !startedDrag) {
+        if (dist > 8 && !startedDrag) {
           startedDrag = true;
           suppressNextClickRef.current = true;
           window.removeEventListener('pointermove', onCheckDrag, true);
           window.removeEventListener('pointerup', onCancelCheck, true);
           selectElementNode(dragEl);
-          beginSiblingDragSession(dragEl, loc, me.clientX, me.clientY, !explicitSelection);
+          beginSiblingDragSession(dragEl, loc, me.clientX, me.clientY);
         }
       };
 
@@ -1120,8 +1164,11 @@ function VisualEditorOverlay() {
     (dragEl, dragLoc, startClientX, startClientY) => {
       if (!dragEl) return;
       const initialCs = window.getComputedStyle(dragEl);
-      const initialMarginLeft = parsePx(initialCs.marginLeft);
-      const initialMarginTop = parsePx(initialCs.marginTop);
+      const isInline = initialCs.display === 'inline';
+      if (isInline) {
+        dragEl.style.display = 'inline-block';
+      }
+      const initialTranslate = parseCurrentTranslate(dragEl);
 
       isDraggingRef.current = true;
       suppressNextClickRef.current = true;
@@ -1139,17 +1186,20 @@ function VisualEditorOverlay() {
         finalDx = dx;
         finalDy = dy;
 
-        dragEl.style.transform = `translate(${dx}px, ${dy}px)`;
+        const currentX = initialTranslate.x + dx;
+        const currentY = initialTranslate.y + dy;
+
+        dragEl.style.transform = `translate(${currentX}px, ${currentY}px)`;
         dragEl.style.zIndex = '999990';
         syncRectOnly();
 
-        const xLabel = dx >= 0 ? `+${dx}px` : `${dx}px`;
-        const yLabel = dy >= 0 ? `+${dy}px` : `${dy}px`;
+        const xLabel = currentX >= 0 ? `+${currentX}px` : `${currentX}px`;
+        const yLabel = currentY >= 0 ? `+${currentY}px` : `${currentY}px`;
 
         setDragGhost({
           x: me.clientX,
           y: me.clientY,
-          label: `Offset X: ${xLabel} · Y: ${yLabel}`,
+          label: `Position: (${xLabel}, ${yLabel})`,
           mode: 'position',
           ready: true,
         });
@@ -1162,30 +1212,48 @@ function VisualEditorOverlay() {
         window.removeEventListener('pointermove', onMove, true);
         window.removeEventListener('pointerup', onUp, true);
 
-        dragEl.style.transform = '';
         dragEl.style.zIndex = '';
-        syncRectOnly();
 
         setTimeout(() => {
           suppressNextClickRef.current = false;
         }, 120);
 
+        const finalX = initialTranslate.x + finalDx;
+        const finalY = initialTranslate.y + finalDy;
+
         if (Math.abs(finalDx) > 3 || Math.abs(finalDy) > 3) {
-          const updates = {};
-          if (Math.abs(finalDx) > 3) {
-            updates.marginLeft = `${Math.max(0, initialMarginLeft + finalDx)}px`;
+          dragEl.style.transform = `translate(${finalX}px, ${finalY}px)`;
+          if (isInline) {
+            dragEl.style.display = 'inline-block';
           }
-          if (Math.abs(finalDy) > 4) {
-            updates.marginTop = `${Math.max(0, initialMarginTop + finalDy)}px`;
+          syncRectOnly();
+          const updates = { transform: `translate(${finalX}px, ${finalY}px)` };
+          if (isInline) {
+            updates.display = 'inline-block';
           }
-          mutateSource('updateStyle', { styles: updates }, dragLoc);
+          mutateSource(
+            'updateStyle',
+            { styles: updates },
+            dragLoc
+          );
+          showNotice(`Moved to (${finalX >= 0 ? '+' : ''}${finalX}px, ${finalY >= 0 ? '+' : ''}${finalY}px)`);
+        } else {
+          if (initialTranslate.x !== 0 || initialTranslate.y !== 0) {
+            dragEl.style.transform = `translate(${initialTranslate.x}px, ${initialTranslate.y}px)`;
+          } else {
+            dragEl.style.transform = '';
+            if (isInline) {
+              dragEl.style.display = '';
+            }
+          }
+          syncRectOnly();
         }
       };
 
       window.addEventListener('pointermove', onMove, true);
       window.addEventListener('pointerup', onUp, true);
     },
-    [mutateSource, syncRectOnly]
+    [mutateSource, syncRectOnly, showNotice]
   );
 
   const selectParentElement = () => {
@@ -1276,10 +1344,10 @@ function VisualEditorOverlay() {
         />
       )}
 
-      {/* Drop Insertion Bar (Visual Reorder Line) */}
+      {/* Drop Insertion Bar (Visual Reorder Line - Figma Style) */}
       {editMode && dropBar && (
         <div
-          className="fe-drop-bar"
+          className={`fe-drop-bar ${dropBar.isRow ? 'vertical' : 'horizontal'}`}
           style={{
             top: dropBar.top,
             left: dropBar.left,
@@ -1305,7 +1373,7 @@ function VisualEditorOverlay() {
       )}
 
       {/* Selected Element Box + Floating Quick Micro-Bar */}
-      {editMode && selectedRect && elProps && (
+      {editMode && selectedRect && elProps && !isDraggingRef.current && (
         <>
           <div
             className="fe-select-box"
@@ -1350,7 +1418,7 @@ function VisualEditorOverlay() {
                 beginPositionDragSession(selectedElRef.current, selectedLoc, e.clientX, e.clientY);
               }}
               style={{ cursor: 'move' }}
-              title="Drag anywhere to move element position (adjusts margin in code)"
+              title="Drag anywhere to freely position element (like Figma)"
             >
               <Move size={12} /> Move
             </button>
@@ -1367,6 +1435,26 @@ function VisualEditorOverlay() {
                 title="Drag onto another element to reorder JSX in code"
               >
                 <GripVertical size={12} /> Reorder
+              </button>
+            )}
+
+            {/* Reset Position (if translated) */}
+            {(elProps.transformX !== 0 || elProps.transformY !== 0) && (
+              <button
+                onClick={() => {
+                  if (selectedElRef.current) {
+                    selectedElRef.current.style.transform = '';
+                    if (selectedElRef.current.style.display === 'inline-block') {
+                      selectedElRef.current.style.display = '';
+                    }
+                  }
+                  mutateSource('updateStyle', { styles: { transform: '', display: '' } }, selectedLoc);
+                  showNotice('Reset position to natural layout flow');
+                }}
+                title="Reset position back to original layout flow"
+                style={{ color: '#fb7185' }}
+              >
+                <RotateCcw size={11} /> Reset Pos
               </button>
             )}
 
@@ -1395,7 +1483,7 @@ function VisualEditorOverlay() {
                 <button
                   className="fe-act-btn"
                   style={{ padding: '4px 6px' }}
-                  onClick={() => setIsPanelOpen(false)}
+                  onClick={closePanel}
                   aria-label="Collapse Inspector"
                   title="Close Inspector (reopen from bottom toolbar)"
                 >
@@ -1499,7 +1587,7 @@ function VisualEditorOverlay() {
                   <button
                     className="fe-act-btn"
                     style={{ padding: '4px 6px' }}
-                    onClick={() => setIsPanelOpen(false)}
+                    onClick={closePanel}
                     aria-label="Collapse Inspector"
                     title="Close Inspector (reopen from bottom toolbar)"
                   >
@@ -1536,6 +1624,44 @@ function VisualEditorOverlay() {
                       ↑ Select Parent
                     </button>
                   </div>
+
+                  {/* Free Canvas Offset / Figma Position */}
+                  {(elProps.transformX !== 0 || elProps.transformY !== 0) && (
+                    <div
+                      style={{
+                        background: 'rgba(99, 102, 241, 0.08)',
+                        border: '1px solid rgba(99, 102, 241, 0.25)',
+                        borderRadius: 8,
+                        padding: '8px 10px',
+                        marginBottom: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: '#c7d2fe' }}>
+                        Free Position: <strong>X: {elProps.transformX > 0 ? `+${elProps.transformX}` : elProps.transformX}px</strong>, <strong>Y: {elProps.transformY > 0 ? `+${elProps.transformY}` : elProps.transformY}px</strong>
+                      </div>
+                      <button
+                        className="fe-act-btn"
+                        style={{ padding: '3px 7px', fontSize: 11, color: '#fb7185' }}
+                        onClick={() => {
+                          if (selectedElRef.current) {
+                            selectedElRef.current.style.transform = '';
+                            if (selectedElRef.current.style.display === 'inline-block') {
+                              selectedElRef.current.style.display = '';
+                            }
+                          }
+                          mutateSource('updateStyle', { styles: { transform: '', display: '' } }, selectedLoc);
+                          showNotice('Reset to natural layout flow');
+                        }}
+                        title="Reset transform to default flow"
+                      >
+                        <RotateCcw size={11} /> Reset
+                      </button>
+                    </div>
+                  )}
+
                   <div className="fe-btn-grid">
                     <button
                       className="fe-act-btn"
@@ -2095,7 +2221,7 @@ function VisualEditorOverlay() {
             <div className="fe-divider" />
             <button
               className={`fe-pill-btn ${isPanelOpen ? 'active' : ''}`}
-              onClick={() => setIsPanelOpen((v) => !v)}
+              onClick={togglePanel}
               title="Toggle Inspector Sidebar"
             >
               <Sliders size={14} />

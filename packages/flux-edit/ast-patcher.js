@@ -349,6 +349,15 @@ export function applyAstMutation(code, relPath, loc, action, payload = {}) {
           }
         }
 
+        if (updates.transform) {
+          // If setting transform, clean up any legacy left/top/position inline styles
+          mergedProps.delete('left');
+          mergedProps.delete('top');
+          if (mergedProps.get('position') === 'position: "relative"') {
+            mergedProps.delete('position');
+          }
+        }
+
         for (const [key, val] of Object.entries(updates)) {
           if (key === 'gradient') continue;
           if (val === '' || val === null || val === undefined) {
@@ -436,7 +445,13 @@ export function applyAstMutation(code, relPath, loc, action, payload = {}) {
       );
 
       if (foundIdx !== -1) {
-        destIdx = foundIdx;
+        if (payload.position === 'after') {
+          destIdx = srcIdx < foundIdx ? foundIdx : foundIdx + 1;
+        } else if (payload.position === 'before') {
+          destIdx = srcIdx < foundIdx ? Math.max(0, foundIdx - 1) : foundIdx;
+        } else {
+          destIdx = foundIdx;
+        }
       } else {
         // Cross-container move within the same file!
         const destPath = findElementPathAtLoc(ast, targetParsed.line, targetParsed.col);
@@ -524,7 +539,20 @@ export function applyAstMutation(code, relPath, loc, action, payload = {}) {
 
     for (let i = 0; i < siblings.length; i++) {
       if (siblings[i] !== reordered[i]) {
-        s.overwrite(siblings[i].start, siblings[i].end, code.slice(reordered[i].start, reordered[i].end));
+        let nodeCode = code.slice(reordered[i].start, reordered[i].end);
+        // Clean up any residual left/top/position/transform inline styles when joining a flow slot
+        nodeCode = nodeCode
+          .replace(/style=\{\{\s*[^}]*\b(left|top|transform):\s*["'][^"']+["'][^}]*\}\}/g, (match) => {
+            const cleaned = match
+              .replace(/\b(left|top|position|transform):\s*["'][^"']+["'],?\s*/g, '')
+              .replace(/,\s*\}/g, ' }');
+            return cleaned.includes(':') ? cleaned : '';
+          })
+          .replace(/className="([^"]*)"/, (m, cls) => {
+            const cleanedCls = cls.split(/\s+/).filter((c) => !/^-?translate-[xy]-\S+$/.test(c) && c !== 'transform').join(' ');
+            return `className="${cleanedCls}"`;
+          });
+        s.overwrite(siblings[i].start, siblings[i].end, nodeCode);
       }
     }
 

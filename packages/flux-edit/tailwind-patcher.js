@@ -150,7 +150,7 @@ export function patchTailwindClasses(currentClassString, styleUpdates) {
       const token = pxToRadiusToken(val);
       replaceOrAdd(/^rounded-bl(-\S+)?$/, token === 'none' ? 'rounded-bl-none' : !token ? 'rounded-bl' : `rounded-bl-${token}`);
     } else if (key === 'display') {
-      if (['flex', 'grid', 'block'].includes(val)) {
+      if (['flex', 'grid', 'block', 'inline-block'].includes(val)) {
         replaceOrAdd(/^(flex|grid|block|inline-block|hidden)$/, val);
       }
     } else if (key === 'flexDirection') {
@@ -164,6 +164,48 @@ export function patchTailwindClasses(currentClassString, styleUpdates) {
         'space-between': 'justify-between',
       };
       if (map[val]) replaceOrAdd(/^justify-\S+$/, map[val]);
+    } else if (key === 'position') {
+      replaceOrAdd(/^(relative|absolute|fixed|static)$/, val);
+    } else if (key === 'left') {
+      const num = parseInt(val, 10);
+      if (Number.isFinite(num)) {
+        if (num === 0) {
+          replaceOrAdd(/^-?left-\S+$/, 'left-0');
+        } else if (num < 0) {
+          replaceOrAdd(/^-?left-\S+$/, `-left-[${Math.abs(num)}px]`);
+        } else {
+          replaceOrAdd(/^-?left-\S+$/, `left-[${num}px]`);
+        }
+      }
+    } else if (key === 'top') {
+      const num = parseInt(val, 10);
+      if (Number.isFinite(num)) {
+        if (num === 0) {
+          replaceOrAdd(/^-?top-\S+$/, 'top-0');
+        } else if (num < 0) {
+          replaceOrAdd(/^-?top-\S+$/, `-top-[${Math.abs(num)}px]`);
+        } else {
+          replaceOrAdd(/^-?top-\S+$/, `top-[${num}px]`);
+        }
+      }
+    } else if (key === 'transform') {
+      tokens = tokens.filter((t) => !/^-?translate-[xy]-\S+$/.test(t) && t !== 'transform');
+      if (val && typeof val === 'string' && val.trim() !== 'none') {
+        const m = val.match(/translate\(\s*(-?\d+(?:\.\d+)?)(?:px)?\s*,\s*(-?\d+(?:\.\d+)?)(?:px)?\s*\)/i);
+        if (m) {
+          const x = Math.round(parseFloat(m[1]));
+          const y = Math.round(parseFloat(m[2]));
+          if (x !== 0 || y !== 0) {
+            tokens.push('transform');
+            if (x !== 0) {
+              tokens.push(x < 0 ? `-translate-x-[${Math.abs(x)}px]` : `translate-x-[${x}px]`);
+            }
+            if (y !== 0) {
+              tokens.push(y < 0 ? `-translate-y-[${Math.abs(y)}px]` : `translate-y-[${y}px]`);
+            }
+          }
+        }
+      }
     } else if (key === 'gradient') {
       // Remove any existing Tailwind gradient utilities
       tokens = tokens.filter((t) => !/^bg-gradient-to-\S+$/.test(t) && !/^(from|via|to)-\S+$/.test(t));
